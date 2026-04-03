@@ -1,0 +1,89 @@
+name: pagersim-openenv
+version: "1.0.0"
+description: "SRE Incident Response simulation environment for AI agent training. Agents act as on-call engineers diagnosing and resolving production outages."
+author: "YOUR_HF_USERNAME"
+homepage: "https://huggingface.co/spaces/YOUR_HF_USERNAME/pagersim-openenv"
+tags:
+  - openenv
+  - sre
+  - incident-response
+  - reinforcement-learning
+  - agent-training
+
+tasks:
+  - id: easy
+    name: "Database Overload"
+    description: "Single service down — postgres connection pool exhausted. Clear logs, obvious root cause."
+    difficulty: easy
+    time_limit_seconds: 300
+    max_steps: 10
+
+  - id: medium
+    name: "Cascading Auth Failure"
+    description: "Auth service memory leak from bad deployment causing cascading failures across 3 services."
+    difficulty: medium
+    time_limit_seconds: 600
+    max_steps: 15
+
+  - id: hard
+    name: "Rate Limiter Config Poisoning"
+    description: "Bad config push to api-gateway throttling all traffic. Red herring deployment present. 5 services affected."
+    difficulty: hard
+    time_limit_seconds: 900
+    max_steps: 20
+
+observation_space:
+  type: object
+  fields:
+    incident_id: "string — unique episode identifier"
+    task_id: "string — easy, medium, or hard"
+    timestamp: "string — relative time like T+45s"
+    alerts: "list — currently firing monitoring alerts with severity"
+    logs: "list — visible log entries, grows as agent investigates"
+    current_status: "dict — maps service name to up/down/degraded/recovering"
+    time_elapsed: "int — seconds since incident started"
+    time_limit: "int — max seconds for this task"
+    actions_taken: "list — history of actions taken this episode"
+    hint: "string or null — nudge shown after 5 stuck steps"
+
+action_space:
+  type: object
+  fields:
+    action_type: "enum — one of 8 action types"
+    target_service: "string or null — service to act on"
+    reasoning: "string — required explanation min 10 chars"
+    postmortem: "object or null — required for write_postmortem action"
+  action_types:
+    - investigate_service
+    - escalate
+    - restart_service
+    - rollback_deployment
+    - check_dependencies
+    - silence_alert
+    - write_postmortem
+    - declare_resolved
+
+reward_range: [0.0, 1.0]
+reward_type: shaped
+
+reward_breakdown:
+  correct_investigation: +0.15
+  correct_dependency_check: +0.10
+  correct_fix: +0.20
+  correct_root_cause_in_postmortem: +0.20
+  postmortem_quality: +0.15
+  incident_resolved: +0.25
+  wrong_restart_or_rollback: -0.10
+  redundant_investigation: -0.05
+  wrong_alert_silence: -0.05
+  timeout: -0.15
+  premature_resolution: -0.10
+
+endpoints:
+  reset: "POST /reset"
+  step: "POST /step"
+  state: "GET /state"
+  tasks: "GET /tasks"
+  grader: "POST /grader"
+  baseline: "POST /baseline"
+  health: "GET /health"
