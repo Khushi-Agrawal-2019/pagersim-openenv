@@ -1,8 +1,17 @@
+---
+title: PagerSim-OpenEnv
+emoji: 🚨
+colorFrom: red
+colorTo: orange
+sdk: Docker
+pinned: false
+---
+
 # PagerSim-OpenEnv
 
 **SRE Incident Response Simulation for AI Agent Training**
 
-[![OpenEnv](https://img.shields.io/badge/OpenEnv-compliant-blue)](https://huggingface.co/spaces/YOUR_HF_USERNAME/pagersim-openenv)
+[![OpenEnv](https://img.shields.io/badge/OpenEnv-compliant-blue)](https://huggingface.co/spaces/Kurru/pagersim-openenv)
 [![Python](https://img.shields.io/badge/python-3.11-green)](https://python.org)
 
 ## Overview
@@ -106,14 +115,11 @@ Rule-based agent following optimal action sequences:
 
 ## Setup
 ```bash
-# Clone and install
 git clone https://huggingface.co/spaces/YOUR_HF_USERNAME/pagersim-openenv
 cd pagersim-openenv
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-
-# Run server
 python3 -m uvicorn api.server:app --host 0.0.0.0 --port 7860
 ```
 
