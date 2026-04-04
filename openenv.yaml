@@ -1,8 +1,8 @@
 name: pagersim-openenv
 version: "1.0.0"
 description: "SRE Incident Response simulation environment for AI agent training. Agents act as on-call engineers diagnosing and resolving production outages."
-author: "YOUR_HF_USERNAME"
-homepage: "https://huggingface.co/spaces/YOUR_HF_USERNAME/pagersim-openenv"
+author: "Kurru"
+homepage: "https://huggingface.co/spaces/Kurru/pagersim-openenv"
 tags:
   - openenv
   - sre
