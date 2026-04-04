@@ -2,8 +2,8 @@
 title: PagerSim-OpenEnv
 emoji: 🚨
 colorFrom: red
-colorTo: orange
-sdk: Docker
+colorTo: blue
+sdk: docker
 pinned: false
 ---
 
