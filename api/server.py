@@ -9,7 +9,7 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -20,12 +20,15 @@ from environment.incidents import get_scenario, SCENARIOS
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup
     global env, server_start_time
-    env = IncidentResponseEnv()
-    server_start_time = time.monotonic()
+    try:
+        env = IncidentResponseEnv()
+        server_start_time = time.monotonic()
+        print("✅ IncidentResponseEnv initialized successfully")
+    except Exception as e:
+        print(f"❌ Failed to initialize env: {e}")
+        raise
     yield
-    # shutdown — nothing needed
 
 
 app = FastAPI(
@@ -42,7 +45,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-env: IncidentResponseEnv
+env: IncidentResponseEnv = None
 server_start_time: float = 0.0
 
 
@@ -96,36 +99,43 @@ async def tasks():
 
 @app.post("/reset")
 async def reset(request: ResetRequest):
+    if env is None:
+        raise HTTPException(500, detail="Environment not initialized. Server still starting up.")
     try:
         obs = env.reset(request.task_id)
         return obs.model_dump()
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(500, detail=f"Reset failed: {str(e)}")
 
 
 @app.post("/step")
 async def step(action: Action):
+    if env is None:
+        raise HTTPException(500, detail="Environment not initialized.")
     try:
         obs, reward, done, info = env.step(action)
-        return {
-            "observation": obs.model_dump(),
-            "reward": reward.model_dump(),
-            "done": done,
-            "info": info,
-        }
     except RuntimeError as e:
-        raise HTTPException(400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=f"Step failed: {str(e)}")
+    return {
+        "observation": obs.model_dump(),
+        "reward": reward.model_dump(),
+        "done": done,
+        "info": info
+    }
 
 
 @app.get("/state")
 async def state():
+    if env is None:
+        raise HTTPException(400, detail="Environment not initialized.")
     try:
-        state = env.state()
-        return state
-    except Exception:
-        raise HTTPException(400, detail="No active episode. Call /reset first.")
+        return env.state()
+    except Exception as e:
+        raise HTTPException(400, detail=f"State failed: {str(e)}")
 
 
 @app.post("/grader")
@@ -216,9 +226,10 @@ async def baseline():
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(
-        status_code=500, content={"error": "Internal server error", "detail": str(exc)}
+        status_code=500,
+        content={"error": "Internal server error", "detail": str(exc)}
     )
 
 
