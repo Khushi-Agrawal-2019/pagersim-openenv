@@ -1,11 +1,4 @@
----
-title: PagerSim-OpenEnv
-emoji: 🚨
-colorFrom: red
-colorTo: blue
-sdk: docker
-pinned: true
----
+
 
 # 🚨 PagerSim-OpenEnv
 
@@ -57,7 +50,7 @@ graph TD
 
 ## 🎯 Key Features
 
-- **Novel Context**: First OpenEnv environment dedicated to DevOps and SRE operations.
+- **Novel Context**: OpenEnv environment dedicated to DevOps and SRE operations.
 - **Cascading Failures**: Supports complex scenarios where the alerting service is a victim of a dependency failure.
 - **Dense Shaped Rewards**: Agents are rewarded for logical investigation steps, not just the final fix.
 - **Dual Mode**: Includes both an autonomous AI Agent playground and an interactive "Human Play" mode for benchmarking.
@@ -127,11 +120,3 @@ python3 inference.py
 2.  **Medium: Cascading Auth Failure**: A memory leak in a core service causes upstream timeouts.
 3.  **Hard: Rate Limiter Poisoning**: A configuration error throttles production traffic; a recent deployment is a red herring.
 
----
-
-## 🎬 Submission Checklist Compliance
-- [x] Follows `sample_inference.py` structure.
-- [x] Environment variables handled via `os.getenv` with proper defaults.
-- [x] `HF_TOKEN` has no default value (required from env).
-- [x] Uses `from openai import OpenAI`.
-- [x] Standardized stdout logging using `START`, `STEP`, and `END` prefixes.

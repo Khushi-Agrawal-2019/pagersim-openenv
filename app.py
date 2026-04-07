@@ -793,7 +793,7 @@ Compare your score against the AI agent.
         # ══════════════════════════════════════════════════════════════════════
         with gr.Tab("🏗️ System Architecture"):
             gr.Markdown("""
-## 🧠 PagerSim-OpenEnv Architecture
+## PagerSim-OpenEnv Architecture
 
 PagerSim-OpenEnv is designed as a high-fidelity simulation of Site Reliability Engineering (SRE) operations. It bridges the gap between traditional LLM benchmarks and real-world operational complexity.
 
@@ -813,17 +813,6 @@ PagerSim-OpenEnv is designed as a high-fidelity simulation of Site Reliability E
     *   **Outcome-Based**: Large rewards for applying the correct fix and writing a technically accurate postmortem.
     *   **Penalty-Driven**: Differentiates between "unnecessary" actions and "harmful" actions (like restarting the wrong service during a peak incident).
 
-### 🔄 Data Flow
-
-```mermaid
-graph TD
-    Agent[AI Agent / Human] -->|Action| API[FastAPI Server]
-    API -->|Step| Engine[Simulation Engine]
-    Engine -->|Update State| Mesh[Service Mesh Emulator]
-    Mesh -->|New Alerts/Logs| Obs[Observation Generator]
-    Obs -->|Observation + Reward| API
-    API -->|JSON Response| Agent
-```
 
 ### 🎯 Design Philosophy: "Operational Reasoning"
 Most OpenEnv environments focus on web navigation or code editing. PagerSim-OpenEnv focuses on **Operational Reasoning**: the ability to distinguish between **symptoms** (api-gateway down) and **root causes** (auth-service memory leak).
