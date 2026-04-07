@@ -788,6 +788,47 @@ Compare your score against the AI agent.
             gr.Markdown("### 📜 Last Action Result")
             history_box = gr.Markdown("_No actions taken yet._", elem_classes=["panel-md"])
 
+        # ══════════════════════════════════════════════════════════════════════
+        # TAB 3 — ARCHITECTURE
+        # ══════════════════════════════════════════════════════════════════════
+        with gr.Tab("🏗️ System Architecture"):
+            gr.Markdown("""
+## 🧠 PagerSim-OpenEnv Architecture
+
+PagerSim-OpenEnv is designed as a high-fidelity simulation of Site Reliability Engineering (SRE) operations. It bridges the gap between traditional LLM benchmarks and real-world operational complexity.
+
+### 🧩 Core Components
+
+1.  **Simulation Engine (Backend)**:
+    *   **State Machine**: Manages the lifecycle of an incident across multiple services.
+    *   **Service Mesh Emulator**: Simulates dependencies, health checks, and cascading failures.
+    *   **Fault Injector**: Dynamically introduces specific root causes (e.g., memory leaks, config poisoning) based on the selected task.
+
+2.  **Observation Layer**:
+    *   Synthesizes realistic "noisy" data: Prometheus-style alerts, structured application logs, and service status maps.
+    *   Implements "reveal" mechanics: Logs are hidden until an agent takes the `investigate_service` action, simulating the cost of context switching and search in real SRE work.
+
+3.  **Reward System**:
+    *   **Dense Shaping**: Provides incremental rewards for investigative steps (checking dependencies, investigating the right service).
+    *   **Outcome-Based**: Large rewards for applying the correct fix and writing a technically accurate postmortem.
+    *   **Penalty-Driven**: Differentiates between "unnecessary" actions and "harmful" actions (like restarting the wrong service during a peak incident).
+
+### 🔄 Data Flow
+
+```mermaid
+graph TD
+    Agent[AI Agent / Human] -->|Action| API[FastAPI Server]
+    API -->|Step| Engine[Simulation Engine]
+    Engine -->|Update State| Mesh[Service Mesh Emulator]
+    Mesh -->|New Alerts/Logs| Obs[Observation Generator]
+    Obs -->|Observation + Reward| API
+    API -->|JSON Response| Agent
+```
+
+### 🎯 Design Philosophy: "Operational Reasoning"
+Most OpenEnv environments focus on web navigation or code editing. PagerSim-OpenEnv focuses on **Operational Reasoning**: the ability to distinguish between **symptoms** (api-gateway down) and **root causes** (auth-service memory leak).
+""")
+
     # ── Wire events ───────────────────────────────────────────────────────────
 
     agent_run_btn.click(

@@ -21,9 +21,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Required hackathon environment variables ──────────────────────────────────
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME   = os.environ.get("MODEL_NAME", "gpt-4o-mini")
-HF_TOKEN     = os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+MODEL_NAME   = os.getenv("MODEL_NAME", "gpt-4o-mini")
+HF_TOKEN     = os.getenv("HF_TOKEN")
+
+# Optional — if you use from_docker_image():
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 
 # ── Environment server ────────────────────────────────────────────────────────
 SERVER_URL = os.environ.get("PAGERSIM_URL", "http://localhost:7860")
@@ -106,9 +109,7 @@ def parse_action(text: str) -> dict | None:
 
 def run_task(client: OpenAI, task_id: str) -> dict:
     """Run one complete task episode. Returns result dict."""
-    print(f"\n{'='*55}")
-    print(f"  TASK: {task_id.upper()}")
-    print(f"{'='*55}")
+    print(f"START: Episode for task '{task_id}'")
 
     # Reset environment
     try:
@@ -174,7 +175,7 @@ def run_task(client: OpenAI, task_id: str) -> dict:
 
         action_type = action_dict.get("action_type", "?")
         target      = action_dict.get("target_service") or "-"
-        print(f"  Step {step+1}: {action_type} → {target}")
+        print(f"STEP: {step+1} | Action: {action_type} | Target: {target}")
 
         # Submit to environment
         try:
@@ -205,6 +206,8 @@ def run_task(client: OpenAI, task_id: str) -> dict:
     elapsed = time.time() - start_time
     success = final_score >= 0.5
 
+    print(f"END: Episode for task '{task_id}' | Final Score: {final_score:.3f}")
+
     return {
         "task_id":      task_id,
         "final_score":  round(max(0.0, min(1.0, final_score)), 3),
@@ -225,7 +228,7 @@ def main():
 
     # Validate required env vars
     if not HF_TOKEN:
-        print("ERROR: HF_TOKEN (or OPENAI_API_KEY) not set")
+        print("ERROR: HF_TOKEN not set")
         sys.exit(1)
 
     if not API_BASE_URL:
