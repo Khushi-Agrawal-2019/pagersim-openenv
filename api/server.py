@@ -12,7 +12,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from environment.env import IncidentResponseEnv
 from environment.models import Action, TaskInfo, EpisodeResult
 from environment.incidents import get_scenario, SCENARIOS
@@ -50,7 +50,7 @@ server_start_time: float = 0.0
 
 
 class ResetRequest(BaseModel):
-    task_id: str | None = "easy"
+    task_id: str = Field("easy", description="ID of the task to reset to")
 
 
 class GraderRequest(BaseModel):
@@ -63,16 +63,6 @@ async def health():
     return {"status": "ok", "version": "1.0.0", "uptime_seconds": time.monotonic() - server_start_time}
 
 
-@app.get("/")
-async def root():
-    return {
-        "name": "PagerSim-OpenEnv",
-        "description": "SRE Incident Response OpenEnv environment",
-        "version": "1.0.0",
-        "endpoints": [{"path": route.path, "method": route.methods} for route in app.routes],
-        "tasks": list(SCENARIOS.keys()),
-        "docs": "/docs",
-    }
 
 
 @app.get("/tasks", response_model=list[TaskInfo])
@@ -98,15 +88,34 @@ async def tasks():
 
 
 @app.post("/reset")
-async def reset(
-    request: ResetRequest | None = Body(None),
-    task_id: str | None = None
-):
-    # 1. Check query param first, then body, then default
-    t_id = task_id or (request.task_id if request else "easy")
-    
+async def reset(request: Request, body: ResetRequest | None = Body(default=None)):
+    """Ultra-resilient reset endpoint. Handles body, query params, and defaults."""
     if env is None:
-        raise HTTPException(500, detail="Environment not initialized. Server still starting up.")
+        raise HTTPException(500, detail="Environment not initialized.")
+    
+    t_id = None
+    
+    # 1. Try query parameters
+    if "task_id" in request.query_params:
+        t_id = request.query_params["task_id"]
+    
+    # 2. Try body from Pydantic
+    if not t_id and body:
+        t_id = body.task_id
+        
+    # 3. Fallback to raw manual check if Pydantic didn't catch it
+    if not t_id:
+        try:
+            raw_json = await request.json()
+            if isinstance(raw_json, dict):
+                t_id = raw_json.get("task_id")
+        except:
+            pass
+            
+    # 4. Final default
+    if not t_id:
+        t_id = "easy"
+
     try:
         obs = env.reset(t_id)
         return obs.model_dump()
@@ -117,11 +126,26 @@ async def reset(
 
 
 @app.post("/step")
-async def step(action: Action):
+async def step(request: Request, action: Action | None = Body(default=None)):
     if env is None:
         raise HTTPException(500, detail="Environment not initialized.")
+    
+    act = action
+    
+    # Fallback to manual parse if Pydantic didn't catch it
+    if not act:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                act = Action(**body)
+        except Exception:
+            pass
+            
+    if not act:
+        raise HTTPException(422, detail="Missing or invalid Action body. Refer to /tasks for schema.")
+
     try:
-        obs, reward, done, info = env.step(action)
+        obs, reward, done, info = env.step(act)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

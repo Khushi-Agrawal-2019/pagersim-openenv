@@ -65,14 +65,10 @@ class PostMortem(BaseModel):
 class Action(BaseModel):
     """What the agent sends to step(). One action per step."""
 
-    action_type: Literal[
-        "investigate_service", "escalate", "restart_service",
-        "rollback_deployment", "check_dependencies", "silence_alert",
-        "write_postmortem", "declare_resolved"
-    ]
-    target_service: Optional[str] = Field(None)
-    reasoning: str = Field(..., min_length=10, description="agent must explain its action")
-    postmortem: Optional[PostMortem] = Field(None)
+    action_type: str
+    target_service: str | None = Field(None)
+    reasoning: str = Field("Automated agent action", min_length=1, description="agent must explain its action")
+    postmortem: PostMortem | None = Field(None)
 
     @model_validator(mode="after")
     def validate_action_fields(self) -> "Action":

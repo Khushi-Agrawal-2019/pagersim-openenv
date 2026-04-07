@@ -44,5 +44,5 @@ USER appuser
 
 EXPOSE 7860
 
-# Start FastAPI in background, then launch Gradio on 7860
-CMD ["sh", "-c", "python3 -m uvicorn api.server:app --host 0.0.0.0 --port 8000 & sleep 2 && python3 app.py"]
+# Start the unified FastAPI + Gradio app on port 7860
+CMD ["python3", "app.py"]

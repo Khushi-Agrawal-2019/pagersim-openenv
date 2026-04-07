@@ -109,111 +109,102 @@ def parse_action(text: str) -> dict | None:
 
 def run_task(client: OpenAI, task_id: str) -> dict:
     """Run one complete task episode. Returns result dict."""
-    print(f"START: Episode for task '{task_id}'")
+    
+    # [START] task=<task_name> env=<benchmark> model=<model_name>
+    print(f"[START] task={task_id} env=pagersim-openenv model={MODEL_NAME}")
 
-    # Reset environment
-    try:
-        r = requests.post(f"{SERVER_URL}/reset", json={"task_id": task_id}, timeout=15)
-        if r.status_code != 200:
-            print(f"  ERROR: Reset failed HTTP {r.status_code}")
-            return {"task_id": task_id, "final_score": 0.0, "steps": 0,
-                    "time_seconds": 0.0, "success": False, "error": r.text}
-    except requests.exceptions.ConnectionError:
-        print(f"  ERROR: Cannot connect to {SERVER_URL}")
-        return {"task_id": task_id, "final_score": 0.0, "steps": 0,
-                "time_seconds": 0.0, "success": False, "error": "connection_refused"}
-
-    obs          = r.json()
-    messages     = [{"role": "system", "content": SYSTEM_PROMPT}]
-    start_time   = time.time()
+    rewards_list = []
     steps        = 0
     final_score  = 0.0
+    start_time   = time.time()
+    last_error   = "null"
 
-    for step in range(MAX_STEPS):
-        # Format and send to LLM
-        user_content = format_observation(obs)
-        messages.append({"role": "user", "content": user_content})
+    try:
+        # Reset environment
+        r = requests.post(f"{SERVER_URL}/reset", json={"task_id": task_id}, timeout=15)
+        if r.status_code != 200:
+            last_error = f"reset_failed_http_{r.status_code}"
+            raise Exception(last_error)
+            
+        obs = r.json()
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-        try:
-            completion = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=800,
-                stream=False,
-            )
-            assistant_text = completion.choices[0].message.content or ""
-        except Exception as exc:
-            print(f"  Step {step+1}: LLM request failed — {exc}")
-            break
+        for step in range(MAX_STEPS):
+            steps = step + 1
+            user_content = format_observation(obs)
+            messages.append({"role": "user", "content": user_content})
 
-        messages.append({"role": "assistant", "content": assistant_text})
-
-        # Parse action
-        action_dict = parse_action(assistant_text)
-        if not action_dict:
-            # Retry once with correction
-            messages.append({
-                "role": "user",
-                "content": "Invalid JSON. Reply ONLY with a JSON object matching the required schema."
-            })
             try:
-                retry = client.chat.completions.create(
+                completion = client.chat.completions.create(
                     model=MODEL_NAME,
                     messages=messages,
                     temperature=0.1,
                     max_tokens=800,
                     stream=False,
                 )
-                action_dict = parse_action(retry.choices[0].message.content or "")
-            except Exception:
-                pass
+                assistant_text = completion.choices[0].message.content or ""
+            except Exception as exc:
+                last_error = f"llm_failed_{str(exc)[:50]}"
+                break
 
+            messages.append({"role": "assistant", "content": assistant_text})
+
+            # Parse action
+            action_dict = parse_action(assistant_text)
             if not action_dict:
-                print(f"  Step {step+1}: Could not parse action, stopping")
+                last_error = "invalid_json_format"
                 break
 
-        action_type = action_dict.get("action_type", "?")
-        target      = action_dict.get("target_service") or "-"
-        print(f"STEP: {step+1} | Action: {action_type} | Target: {target}")
-
-        # Submit to environment
-        try:
-            r = requests.post(f"{SERVER_URL}/step", json=action_dict, timeout=15)
-            if r.status_code != 200:
-                print(f"  Step failed HTTP {r.status_code}: {r.text[:80]}")
+            # Submit to environment
+            try:
+                r = requests.post(f"{SERVER_URL}/step", json=action_dict, timeout=15)
+                if r.status_code != 200:
+                    last_error = f"step_failed_http_{r.status_code}"
+                    break
+            except Exception as exc:
+                last_error = f"connection_lost_{str(exc)[:50]}"
                 break
-        except requests.exceptions.ConnectionError:
-            print(f"  Lost connection to environment server")
-            break
 
-        result      = r.json()
-        obs         = result["observation"]
-        reward      = result["reward"]
-        done        = result["done"]
-        final_score = reward["cumulative_score"]
-        steps       = step + 1
+            result = r.json()
+            obs = result["observation"]
+            reward_data = result["reward"]
+            done = result["done"]
+            
+            step_reward = reward_data["score"]
+            final_score = reward_data["cumulative_score"]
+            rewards_list.append(step_reward)
 
-        sign = "+" if reward["score"] >= 0 else ""
-        print(f"         reward: {sign}{reward['score']:.2f} | "
-              f"cumulative: {final_score:.3f} | "
-              f"{reward['feedback'][:55]}")
+            # [STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+            action_str = f"{action_dict.get('action_type', '?')}"
+            if action_dict.get("target_service"):
+                action_str += f":{action_dict['target_service']}"
+            
+            done_str = "true" if done else "false"
+            print(f"[STEP] step={steps} action={action_str} reward={step_reward:.2f} done={done_str} error={last_error}")
 
-        if done:
-            print(f"  Episode ended: {result.get('info', {}).get('reason', 'done')}")
-            break
+            if done:
+                break
+                
+    except Exception as e:
+        if last_error == "null":
+            last_error = str(e)[:50]
 
     elapsed = time.time() - start_time
-    success = final_score >= 0.5
-
-    print(f"END: Episode for task '{task_id}' | Final Score: {final_score:.3f}")
+    success = "true" if final_score >= 0.5 else "false"
+    
+    # [END] success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
+    rewards_str = ",".join([f"{r:.2f}" for r in rewards_list])
+    # Ensure rewards_str is not empty for formatting
+    if not rewards_str: rewards_str = "0.00"
+    
+    print(f"[END] success={success} steps={steps} score={final_score:.2f} rewards={rewards_str}")
 
     return {
         "task_id":      task_id,
         "final_score":  round(max(0.0, min(1.0, final_score)), 3),
         "steps":        steps,
         "time_seconds": round(elapsed, 1),
-        "success":      success,
+        "success":      final_score >= 0.5,
     }
 
 

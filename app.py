@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Credentials ───────────────────────────────────────────────────────────────
-API_PORT   = int(os.environ.get("API_PORT", "8000"))
+API_PORT   = 7860
 BASE_URL   = f"http://127.0.0.1:{API_PORT}"
 HF_TOKEN   = os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY") or ""
 MODEL_NAME = os.environ.get("MODEL_NAME", "openai/gpt-4o-mini")
@@ -69,6 +69,8 @@ def score_bar(score: float) -> str:
     c = max(0.0, min(1.0, score))
     bar = "█" * int(c * 20) + "░" * (20 - int(c * 20))
     return f"`[{bar}]` **{c:.3f}** ({int(c*100)}%)"
+
+
 
 
 # ── Human Play ────────────────────────────────────────────────────────────────
@@ -844,5 +846,18 @@ Most OpenEnv environments focus on web navigation or code editing. PagerSim-Open
     baseline_btn.click(fn=run_baseline_quick, inputs=[], outputs=[baseline_out])
 
 
+# ── Unified App for HF Spaces ───────────────────────────────────────────────
+from api.server import app as fastapi_app
+from fastapi.responses import RedirectResponse
+
+@fastapi_app.get("/", include_in_schema=False)
+async def home_redirect():
+    # Redirect human users from / to /ui 
+    return RedirectResponse(url="/ui")
+
+app = gr.mount_gradio_app(fastapi_app, demo, path="/ui")
+
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860, show_error=True)
+    import uvicorn
+    # Use 7860 as the main port for everything
+    uvicorn.run(app, host="0.0.0.0", port=7860)
