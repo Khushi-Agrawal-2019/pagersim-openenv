@@ -1,7 +1,11 @@
 """
 PagerSim-OpenEnv — Gradio UI
-Pure Gradio frontend. Talks to FastAPI backend via HTTP only.
-FastAPI runs on port 8000. Gradio runs on port 7860.
+FastAPI on port 8000. Gradio on port 7860.
+
+Credentials from .env (local) or HF Secrets (deployed):
+  HF_TOKEN     — OpenRouter or OpenAI API key
+  MODEL_NAME   — e.g. openai/gpt-4o-mini  (OpenRouter) or gpt-4o-mini (OpenAI)
+  API_BASE_URL — https://openrouter.ai/api/v1  OR  https://api.openai.com/v1
 """
 
 from __future__ import annotations
@@ -9,434 +13,806 @@ import gradio as gr
 import requests
 import json
 import os
+import time
+from dotenv import load_dotenv
 
-# FastAPI backend URL — separate process on port 8000
-API_PORT = int(os.environ.get("API_PORT", "8000"))
-BASE_URL = f"http://127.0.0.1:{API_PORT}"
+load_dotenv()
 
+# ── Credentials ───────────────────────────────────────────────────────────────
+API_PORT   = int(os.environ.get("API_PORT", "8000"))
+BASE_URL   = f"http://127.0.0.1:{API_PORT}"
+HF_TOKEN   = os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY") or ""
+MODEL_NAME = os.environ.get("MODEL_NAME", "openai/gpt-4o-mini")
+API_BASE   = os.environ.get("API_BASE_URL", "https://openrouter.ai/api/v1")
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def check_server() -> bool:
     try:
-        r = requests.get(f"{BASE_URL}/health", timeout=3)
-        return r.status_code == 200
+        return requests.get(f"{BASE_URL}/health", timeout=3).status_code == 200
     except Exception:
         return False
 
 
-def format_alerts(alerts: list) -> str:
+def fmt_alerts(alerts: list) -> str:
     if not alerts:
         return "_No active alerts._"
     icons = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}
-    lines = []
-    for a in alerts:
-        icon = icons.get(a["severity"], "⚪")
-        lines.append(
-            f"{icon} **[{a['severity'].upper()}] {a['service_name']}**  \n"
-            f"&nbsp;&nbsp;&nbsp;{a['message']}"
-        )
-    return "\n\n".join(lines)
+    return "\n\n".join(
+        f"{icons.get(a['severity'],'⚪')} **[{a['severity'].upper()}] {a['service_name']}**  \n"
+        f"&nbsp;&nbsp;&nbsp;{a['message']}"
+        for a in alerts
+    )
 
 
-def format_logs(logs: list) -> str:
+def fmt_logs(logs: list) -> str:
     if not logs:
         return "_No logs yet._"
     icons = {"ERROR": "❌", "WARN": "⚠️", "INFO": "ℹ️", "DEBUG": "🔍"}
-    lines = []
-    for log in logs[-15:]:
-        icon = icons.get(log["level"], "•")
-        lines.append(
-            f"`{log['timestamp']}` {icon} `[{log['service']}]` {log['message']}"
-        )
-    return "\n".join(lines)
+    return "\n".join(
+        f"`{l['timestamp']}` {icons.get(l['level'],'•')} `[{l['service']}]` {l['message']}"
+        for l in logs[-15:]
+    )
 
 
-def format_status(status: dict) -> str:
+def fmt_status(status: dict) -> str:
     if not status:
         return "_No services._"
     icons = {"up": "✅", "down": "🔴", "degraded": "🟠", "recovering": "🔄"}
-    lines = []
-    for service, state in status.items():
-        icon = icons.get(state, "⚪")
-        lines.append(f"{icon} **{service}**: `{state}`")
-    return "\n".join(lines)
+    return "\n".join(
+        f"{icons.get(state,'⚪')} **{svc}**: `{state}`"
+        for svc, state in status.items()
+    )
 
 
-def format_score_bar(score: float) -> str:
-    clamped = max(0.0, min(1.0, score))
-    filled = int(clamped * 20)
-    bar = "█" * filled + "░" * (20 - filled)
-    pct = int(clamped * 100)
-    return f"`[{bar}]` **{clamped:.3f}** ({pct}%)"
+def score_bar(score: float) -> str:
+    c = max(0.0, min(1.0, score))
+    bar = "█" * int(c * 20) + "░" * (20 - int(c * 20))
+    return f"`[{bar}]` **{c:.3f}** ({int(c*100)}%)"
 
 
-# ── API functions ─────────────────────────────────────────────────────────────
+# ── Human Play ────────────────────────────────────────────────────────────────
 
-def do_reset(task_id: str):
+def human_reset(task_id: str):
     if not check_server():
-        err = (
-            f"❌ **Cannot reach FastAPI backend on port {API_PORT}.**\n\n"
-            f"Open a terminal and run:\n"
-            f"```\nsource venv/bin/activate\n"
-            f"python3 -m uvicorn api.server:app --host 0.0.0.0 --port {API_PORT}\n```"
-        )
-        return err, "_No alerts_", "_No services_", "_No logs_", format_score_bar(0.0), err, "{}"
-
+        err = f"❌ **Backend offline.** Run: `python3 -m uvicorn api.server:app --port {API_PORT}`"
+        return err, "_", "_", "_", score_bar(0.0), err, "{}"
     try:
-        r = requests.post(
-            f"{BASE_URL}/reset",
-            json={"task_id": task_id},
-            timeout=10
-        )
+        r = requests.post(f"{BASE_URL}/reset", json={"task_id": task_id}, timeout=10)
         if r.status_code != 200:
-            err = f"❌ Reset failed (HTTP {r.status_code}): {r.text}"
-            return err, "", "", "", format_score_bar(0.0), err, "{}"
-
+            err = f"❌ Reset failed HTTP {r.status_code}: {r.text}"
+            return err, "", "", "", score_bar(0.0), err, "{}"
         obs = r.json()
-        info_md = (
-            f"### 🚨 Incident: `{obs['incident_id']}`\n"
-            f"**Task:** `{task_id.upper()}` &nbsp;|&nbsp; "
-            f"**Time limit:** `{obs['time_limit']}s`"
+        info = (
+            f"### 🚨 `{obs['incident_id']}` — {task_id.upper()}\n"
+            f"**Time limit:** `{obs['time_limit']}s`  ·  Investigate the most critical alerting service first."
         )
-        alerts_md  = format_alerts(obs["alerts"])
-        status_md  = format_status(obs["current_status"])
-        logs_md    = format_logs(obs["logs"])
-        score_md   = format_score_bar(0.0)
-        history_md = (
-            f"✅ **Episode started — {task_id.upper()} task loaded.**\n\n"
-            f"You have `{obs['time_limit']}s` to resolve the incident.\n\n"
-            f"**Start by investigating the most critical alerting service.**"
-        )
-        return info_md, alerts_md, status_md, logs_md, score_md, history_md, json.dumps(obs)
-
-    except requests.exceptions.ConnectionError:
-        err = f"❌ Connection refused on port {API_PORT}. Is FastAPI running?"
-        return err, "", "", "", format_score_bar(0.0), err, "{}"
+        return (info, fmt_alerts(obs["alerts"]), fmt_status(obs["current_status"]),
+                fmt_logs(obs["logs"]), score_bar(0.0),
+                "✅ Episode started — take your first action below.", json.dumps(obs))
     except Exception as e:
-        err = f"❌ Error: {type(e).__name__}: {str(e)}"
-        return err, "", "", "", format_score_bar(0.0), err, "{}"
+        err = f"❌ {type(e).__name__}: {e}"
+        return err, "", "", "", score_bar(0.0), err, "{}"
 
 
-def do_step(
-    obs_state: str,
-    action_type: str,
-    target_service: str,
-    reasoning: str,
-    root_cause: str,
-    timeline: str,
-    impact: str,
-    resolution: str,
-    prevention: str,
-):
+def human_step(obs_state, action_type, target_service, reasoning,
+               root_cause, timeline, impact, resolution, prevention):
     if not obs_state or obs_state == "{}":
         msg = "⚠️ **No active episode.** Click **Start Episode** first."
-        return msg, "_No alerts_", "_No services_", "_No logs_", format_score_bar(0.0), msg, "{}"
-
+        return msg, "_", "_", "_", score_bar(0.0), msg, "{}"
     if not reasoning or len(reasoning.strip()) < 10:
-        try:
-            current_obs = json.loads(obs_state)
-        except Exception:
-            current_obs = {}
-        msg = "⚠️ **Reasoning is required** — must be at least 10 characters."
-        return (
-            "_",
-            format_alerts(current_obs.get("alerts", [])),
-            format_status(current_obs.get("current_status", {})),
-            format_logs(current_obs.get("logs", [])),
-            format_score_bar(0.0),
-            msg,
-            obs_state,
-        )
-
+        cur = json.loads(obs_state) if obs_state != "{}" else {}
+        return ("_", fmt_alerts(cur.get("alerts", [])), fmt_status(cur.get("current_status", {})),
+                fmt_logs(cur.get("logs", [])), score_bar(0.0),
+                "⚠️ **Reasoning required** — minimum 10 characters.", obs_state)
     action: dict = {
         "action_type": action_type,
-        "target_service": target_service.strip() if target_service.strip() else None,
+        "target_service": target_service.strip() or None,
         "reasoning": reasoning.strip(),
         "postmortem": None,
     }
-
     if action_type == "write_postmortem":
-        timeline_list = [t.strip() for t in timeline.split("\n") if t.strip()]
-        if len(timeline_list) < 2:
-            timeline_list = [
-                "T+0s: Incident detected via monitoring alerts",
-                "T+60s: Root cause identified through log investigation",
-                "T+120s: Fix applied and services recovering",
-            ]
+        tl = [t.strip() for t in timeline.split("\n") if t.strip()]
+        if len(tl) < 2:
+            tl = ["T+0s: Incident detected", "T+60s: Root cause found", "T+120s: Fix applied"]
         action["postmortem"] = {
-            "root_cause": root_cause.strip() if root_cause.strip() else "unknown root cause",
-            "timeline": timeline_list,
-            "impact": impact.strip() if impact.strip() else "Services degraded affecting users",
-            "resolution": resolution.strip() if resolution.strip() else "Fix applied to affected service",
-            "prevention": prevention.strip() if prevention.strip() else "Add monitoring and alerts",
+            "root_cause": root_cause.strip() or "unknown",
+            "timeline": tl,
+            "impact": impact.strip() or "Services degraded",
+            "resolution": resolution.strip() or "Fix applied",
+            "prevention": prevention.strip() or "Add monitoring",
         }
-
     try:
         r = requests.post(f"{BASE_URL}/step", json=action, timeout=10)
-
         if r.status_code != 200:
-            err = f"❌ Step failed (HTTP {r.status_code}): {r.text}"
-            return err, "", "", "", format_score_bar(0.0), err, obs_state
-
-        result = r.json()
-        obs    = result["observation"]
-        reward = result["reward"]
-        done   = result["done"]
-
-        alerts_md = format_alerts(obs["alerts"])
-        status_md = format_status(obs["current_status"])
-        logs_md   = format_logs(obs["logs"])
-        score_md  = format_score_bar(reward["cumulative_score"])
-
-        step_num     = len(obs["actions_taken"])
-        score_emoji  = "📈" if reward["score"] >= 0 else "📉"
-        target_label = f":{target_service.strip()}" if target_service.strip() else ""
-
-        history_md = (
-            f"**Step {step_num}:** `{action_type}{target_label}`\n\n"
-            f"{score_emoji} Step reward: `{reward['score']:+.2f}` &nbsp;|&nbsp; "
-            f"Cumulative: `{reward['cumulative_score']:.3f}`\n\n"
+            err = f"❌ Step failed HTTP {r.status_code}: {r.text}"
+            return err, "", "", "", score_bar(0.0), err, obs_state
+        res    = r.json()
+        obs    = res["observation"]
+        reward = res["reward"]
+        done   = res["done"]
+        n      = len(obs["actions_taken"])
+        tgt    = f":{target_service.strip()}" if target_service.strip() else ""
+        emoji  = "📈" if reward["score"] >= 0 else "📉"
+        fb = (
+            f"**Step {n}:** `{action_type}{tgt}`\n\n"
+            f"{emoji} Reward: `{reward['score']:+.2f}` | Cumulative: `{reward['cumulative_score']:.3f}`\n\n"
             f"💬 _{reward['feedback']}_"
         )
-
         if obs.get("hint"):
-            history_md += f"\n\n💡 **Hint:** {obs['hint']}"
-
+            fb += f"\n\n💡 **Hint:** {obs['hint']}"
         if done:
-            final = reward["cumulative_score"]
-            if final >= 0.8:
-                grade = "🏆 Excellent work!"
-            elif final >= 0.6:
-                grade = "✅ Good job!"
-            elif final >= 0.4:
-                grade = "⚠️ Partial success"
-            else:
-                grade = "❌ Needs improvement"
-
-            history_md += (
-                f"\n\n---\n"
-                f"## 🎬 Episode Complete!\n"
-                f"**Final Score: `{final:.3f}`** — {grade}\n\n"
-                f"Click **Start Episode** to try again."
-            )
-
-        info_md = (
-            f"### 🚨 Incident: `{obs['incident_id']}`\n"
-            f"**Task:** `{obs['task_id'].upper()}` &nbsp;|&nbsp; "
-            f"**Time:** `{obs['time_elapsed']}s / {obs['time_limit']}s` &nbsp;|&nbsp; "
-            f"**Step:** `{step_num}`"
+            f = reward["cumulative_score"]
+            g = "🏆 Excellent!" if f>=0.8 else "✅ Good!" if f>=0.6 else "⚠️ Partial" if f>=0.4 else "❌ Needs work"
+            fb += f"\n\n---\n## 🎬 Episode Complete!\n**Final Score: `{f:.3f}`** — {g}"
+        info = (
+            f"### 🚨 `{obs['incident_id']}` — {obs['task_id'].upper()}\n"
+            f"**Time:** `{obs['time_elapsed']}s / {obs['time_limit']}s` · **Step:** `{n}`"
         )
-        if obs.get("hint"):
-            info_md += f"\n\n💡 **Hint:** {obs['hint']}"
-
-        return (
-            info_md, alerts_md, status_md, logs_md,
-            score_md, history_md, json.dumps(obs)
-        )
-
-    except requests.exceptions.ConnectionError:
-        err = f"❌ Lost connection to backend on port {API_PORT}."
-        return err, "", "", "", format_score_bar(0.0), err, obs_state
+        return (info, fmt_alerts(obs["alerts"]), fmt_status(obs["current_status"]),
+                fmt_logs(obs["logs"]), score_bar(reward["cumulative_score"]), fb, json.dumps(obs))
     except Exception as e:
-        err = f"❌ Error: {type(e).__name__}: {str(e)}"
-        return err, "", "", "", format_score_bar(0.0), err, obs_state
+        err = f"❌ {type(e).__name__}: {e}"
+        return err, "", "", "", score_bar(0.0), err, obs_state
 
 
-def do_baseline():
+def run_baseline_quick():
     if not check_server():
-        return f"❌ Cannot reach backend on port {API_PORT}. Start FastAPI first."
+        return f"❌ Backend offline. Start FastAPI on port {API_PORT} first."
     try:
         r = requests.post(f"{BASE_URL}/baseline", timeout=60)
         if r.status_code != 200:
-            return f"❌ Baseline failed (HTTP {r.status_code}): {r.text}"
-
-        data   = r.json()
-        scores = data["scores"]
-        avg    = data["average"]
-
-        md  = "## 🤖 Baseline Agent Results\n\n"
-        md += "| Task | Score | Bar | Rating |\n|---|---|---|---|\n"
-        for task, score in scores.items():
-            filled = int(score * 10)
-            bar    = "█" * filled + "░" * (10 - filled)
-            rating = "🏆" if score >= 0.8 else "✅" if score >= 0.6 else "⚠️"
-            md += f"| **{task.capitalize()}** | `{score:.3f}` | `{bar}` | {rating} |\n"
-        md += f"\n**Average Score: `{avg:.3f}`**\n\n"
-        md += "_Deterministic rule-based agent following optimal action sequences._"
+            return f"❌ Baseline failed HTTP {r.status_code}"
+        data = r.json()
+        md = "## 🤖 Rule-Based Baseline Results\n\n| Task | Score | Rating |\n|---|---|---|\n"
+        for task, score in data["scores"].items():
+            rt = "🏆" if score >= 0.8 else "✅" if score >= 0.6 else "⚠️"
+            md += f"| **{task.capitalize()}** | `{score:.3f}` | {rt} |\n"
+        md += f"\n**Average: `{data['average']:.3f}`** — Deterministic rule-based agent."
         return md
-
     except Exception as e:
-        return f"❌ Error: {type(e).__name__}: {str(e)}"
+        return f"❌ {e}"
+
+
+# ── Agent Run ─────────────────────────────────────────────────────────────────
+
+AGENT_PROMPT = """You are an expert SRE responding to a production incident.
+At each step respond ONLY with valid JSON — no markdown, no text outside JSON.
+
+{
+  "action_type": <one of: investigate_service | escalate | restart_service |
+                  rollback_deployment | check_dependencies | silence_alert |
+                  write_postmortem | declare_resolved>,
+  "target_service": <service name or null>,
+  "reasoning": <explanation, min 10 chars>,
+  "postmortem": <null or {root_cause, timeline (3+ items), impact, resolution, prevention}>
+}
+
+Strategy: investigate critical services → check dependencies → apply fix → postmortem → declare_resolved."""
+
+
+def obs_to_text(obs: dict) -> str:
+    alerts   = "\n".join(f"  [{a['severity'].upper()}] {a['service_name']}: {a['message']}" for a in obs.get("alerts", []))
+    statuses = "\n".join(f"  {svc}: {state}" for svc, state in obs.get("current_status", {}).items())
+    logs     = "\n".join(f"  {l['timestamp']} [{l['service']}] {l['level']}: {l['message']}" for l in obs.get("logs", [])[-10:])
+    hint     = f"\nHINT: {obs['hint']}" if obs.get("hint") else ""
+    return (f"INCIDENT: {obs.get('incident_id')} | {obs.get('task_id','').upper()} | "
+            f"{obs.get('time_elapsed')}s/{obs.get('time_limit')}s\n\n"
+            f"ALERTS:\n{alerts}\n\nSERVICE STATUS:\n{statuses}\n\n"
+            f"RECENT LOGS:\n{logs}\n\nACTIONS SO FAR: {obs.get('actions_taken', [])}{hint}")
+
+
+def parse_action(text: str) -> dict | None:
+    try:
+        cleaned = text.strip()
+        if "```" in cleaned:
+            cleaned = "\n".join(l for l in cleaned.split("\n") if not l.strip().startswith("```"))
+        result = json.loads(cleaned)
+        if isinstance(result, dict) and "action_type" in result:
+            return result
+    except Exception:
+        pass
+    return None
+
+
+def run_agent_episode(task_id: str, progress=gr.Progress()):
+    """Generator — yields live updates as the agent works."""
+
+    if not check_server():
+        yield (f"❌ **Backend offline.**\n```\npython3 -m uvicorn api.server:app --port {API_PORT}\n```",
+               "_", "_", score_bar(0.0), "❌ Backend offline")
+        return
+
+    api_key  = HF_TOKEN
+    model    = MODEL_NAME
+    api_base = API_BASE
+
+    if not api_key:
+        yield (
+            "❌ **No API credentials found.**\n\n"
+            "**Local:** Add to `.env`:\n"
+            "```\nHF_TOKEN=sk-or-v1-your-openrouter-key\n"
+            "MODEL_NAME=openai/gpt-4o-mini\n"
+            "API_BASE_URL=https://openrouter.ai/api/v1\n```\n\n"
+            "**HF Spaces:** Space Settings → Variables and Secrets → add `HF_TOKEN`",
+            "_", "_", score_bar(0.0), "❌ No credentials",
+        )
+        return
+
+    # Show which provider we're using
+    provider = "OpenRouter" if "openrouter" in api_base else "OpenAI"
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url=api_base)
+    except Exception as e:
+        yield (f"❌ Failed to init LLM client: {e}", "_", "_", score_bar(0.0), "❌ Init error")
+        return
+
+    try:
+        r = requests.post(f"{BASE_URL}/reset", json={"task_id": task_id}, timeout=10)
+        if r.status_code != 200:
+            yield (f"❌ Reset failed HTTP {r.status_code}", "_", "_", score_bar(0.0), "❌ Reset failed")
+            return
+        obs = r.json()
+    except Exception as e:
+        yield (f"❌ {e}", "_", "_", score_bar(0.0), "❌ Connection error")
+        return
+
+    SCENARIO_NAMES = {"easy": "Database Overload", "medium": "Cascading Auth Failure", "hard": "Rate Limiter Poisoning"}
+    scenario_name = SCENARIO_NAMES.get(task_id, task_id)
+
+    messages   = [{"role": "system", "content": AGENT_PROMPT}]
+    step_log   = []
+    cumulative = 0.0
+    max_steps  = 15
+    start_ts   = time.time()
+
+    def build_log(extra: str = "") -> str:
+        header = (
+            f"## 🤖 AI Agent — `{scenario_name}` ({task_id.upper()})\n\n"
+            f"**Provider:** {provider} &nbsp;·&nbsp; **Model:** `{model}` &nbsp;·&nbsp; "
+            f"**Incident:** `{obs.get('incident_id','')}` &nbsp;·&nbsp; "
+            f"**Time limit:** `{obs.get('time_limit','')}s`\n\n"
+            f"---\n### 🔔 Incident Alerts\n{fmt_alerts(obs.get('alerts', []))}\n\n---\n"
+        )
+        return header + "\n".join(step_log) + ("\n" + extra if extra else "")
+
+    yield (
+        f"## 🤖 AI Agent Starting — `{scenario_name}`\n\n"
+        f"**Incident:** `{obs.get('incident_id')}` · **Time limit:** `{obs.get('time_limit')}s`\n\n"
+        f"**Affected:** {', '.join(f'`{s}`' for s in obs.get('current_status', {}).keys())}\n\n"
+        f"---\n### 🔔 Active Alerts\n{fmt_alerts(obs.get('alerts', []))}\n\n"
+        f"---\n*Agent analyzing the incident...*",
+        fmt_status(obs.get("current_status", {})),
+        fmt_logs(obs.get("logs", [])),
+        score_bar(0.0),
+        "🔄 Agent initializing...",
+    )
+    time.sleep(0.5)
+
+    for step in range(max_steps):
+        progress((step + 1) / max_steps, desc=f"Step {step + 1}/{max_steps}")
+        messages.append({"role": "user", "content": obs_to_text(obs)})
+
+        yield (build_log(f"\n⏳ **Step {step+1}:** Agent thinking..."),
+               fmt_status(obs.get("current_status", {})),
+               fmt_logs(obs.get("logs", [])),
+               score_bar(cumulative),
+               f"🔄 Step {step+1} — thinking...")
+
+        try:
+            completion = client.chat.completions.create(
+                model=model, messages=messages, temperature=0.1, max_tokens=800, stream=False)
+            assistant_text = completion.choices[0].message.content or ""
+        except Exception as exc:
+            # Show helpful message for 401
+            err_str = str(exc)
+            if "401" in err_str or "invalid_api_key" in err_str:
+                msg = (
+                    f"\n❌ **Step {step+1}: Authentication failed (401)**\n\n"
+                    f"Your API key was rejected. Check:\n"
+                    f"- Is `HF_TOKEN` in your `.env` set to your **OpenRouter** key (`sk-or-v1-...`)?\n"
+                    f"- Is `API_BASE_URL` set to `https://openrouter.ai/api/v1`?\n"
+                    f"- Is `MODEL_NAME` set to `openai/gpt-4o-mini` (with the `openai/` prefix)?\n\n"
+                    f"Current config: base=`{api_base}` model=`{model}`"
+                )
+            else:
+                msg = f"\n❌ **Step {step+1}: LLM error** — `{exc}`"
+            step_log.append(msg)
+            yield (build_log(), fmt_status(obs.get("current_status", {})),
+                   fmt_logs(obs.get("logs", [])), score_bar(cumulative), "❌ LLM error")
+            break
+
+        messages.append({"role": "assistant", "content": assistant_text})
+
+        action_dict = parse_action(assistant_text)
+        if not action_dict:
+            messages.append({"role": "user", "content": "Reply ONLY with a JSON object."})
+            try:
+                retry = client.chat.completions.create(
+                    model=model, messages=messages, temperature=0.1, max_tokens=800)
+                action_dict = parse_action(retry.choices[0].message.content or "")
+                messages.append({"role": "assistant", "content": retry.choices[0].message.content or ""})
+            except Exception:
+                pass
+
+        if not action_dict:
+            step_log.append(f"\n❌ **Step {step+1}:** Could not parse agent response.")
+            yield (build_log(), fmt_status(obs.get("current_status", {})),
+                   fmt_logs(obs.get("logs", [])), score_bar(cumulative), "❌ Parse failed")
+            break
+
+        action_type = action_dict.get("action_type", "?")
+        target      = action_dict.get("target_service") or "—"
+        reasoning   = action_dict.get("reasoning", "")
+
+        try:
+            r = requests.post(f"{BASE_URL}/step", json=action_dict, timeout=10)
+            if r.status_code != 200:
+                step_log.append(f"\n❌ **Step {step+1}:** Server error {r.status_code}")
+                break
+            result     = r.json()
+            obs        = result["observation"]
+            reward     = result["reward"]
+            done       = result["done"]
+            cumulative = reward["cumulative_score"]
+            step_n     = len(obs["actions_taken"])
+        except Exception as e:
+            step_log.append(f"\n❌ **Step {step+1}:** {e}")
+            break
+
+        sign      = "+" if reward["score"] >= 0 else ""
+        emoji     = "📈" if reward["score"] >= 0 else "📉"
+        tgt_str   = f" → `{target}`" if target != "—" else ""
+
+        step_log.append(
+            f"\n---\n"
+            f"### Step {step_n} · `{action_type}`{tgt_str}\n\n"
+            f"**🧠 Agent's Reasoning:**\n> _{reasoning}_\n\n"
+            f"{emoji} **Reward:** `{sign}{reward['score']:.2f}` &nbsp;·&nbsp; "
+            f"**Cumulative:** `{cumulative:.3f}`\n\n"
+            f"💬 **Environment feedback:** _{reward['feedback']}_"
+            + (f"\n\n💡 **Hint:** {obs['hint']}" if obs.get("hint") else "")
+        )
+
+        yield (build_log(), fmt_status(obs.get("current_status", {})),
+               fmt_logs(obs.get("logs", [])), score_bar(cumulative), f"✅ Step {step_n} — {action_type}")
+
+        if done:
+            break
+        time.sleep(0.2)
+
+    elapsed = round(time.time() - start_ts, 1)
+    f_score = cumulative
+    grade, g_icon = (
+        ("Excellent",         "🏆") if f_score >= 0.8 else
+        ("Good",              "✅") if f_score >= 0.6 else
+        ("Partial Success",   "⚠️") if f_score >= 0.4 else
+        ("Needs Improvement", "❌")
+    )
+    step_log.append(
+        f"\n---\n## {g_icon} Episode Complete — {grade}\n\n"
+        f"| Metric | Value |\n|---|---|\n"
+        f"| **Final Score** | `{f_score:.3f} / 1.000` |\n"
+        f"| **Steps** | `{len(step_log)}` |\n"
+        f"| **Time** | `{elapsed}s` |\n"
+        f"| **Task** | `{task_id.upper()}` |\n"
+        f"| **Model** | `{model}` |\n"
+    )
+    yield (build_log(), fmt_status(obs.get("current_status", {})),
+           fmt_logs(obs.get("logs", [])), score_bar(f_score), f"{g_icon} Done — {f_score:.3f}")
+
+
+# ── CSS ───────────────────────────────────────────────────────────────────────
+
+CSS = """
+.gradio-container { background: #0d1117 !important; max-width: 100% !important; }
+footer { display: none !important; }
+
+/* Tabs */
+.tab-nav button {
+    font-weight: 700 !important; font-size: 13px !important;
+    color: #8b949e !important; background: transparent !important;
+    border: none !important; border-bottom: 2px solid transparent !important;
+    padding: 12px 20px !important;
+}
+.tab-nav button.selected { color: #f85149 !important; border-bottom-color: #f85149 !important; }
+
+/* Labels */
+label span {
+    color: #8b949e !important; font-size: 11px !important;
+    font-weight: 600 !important; text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
+}
+
+/* Inputs */
+input, textarea, select {
+    background: #161b22 !important; border: 1px solid #30363d !important;
+    color: #c9d1d9 !important; border-radius: 6px !important; font-size: 13px !important;
+}
+input:focus, textarea:focus, select:focus {
+    border-color: #f85149 !important;
+    box-shadow: 0 0 0 3px rgba(248,81,73,0.1) !important;
+}
+
+/* ── Scenario Radio — styled as cards ── */
+.scenario-radio .wrap {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr 1fr !important;
+    gap: 12px !important;
+}
+.scenario-radio .wrap label {
+    display: block !important;
+    background: #161b22 !important;
+    border: 1px solid #21262d !important;
+    border-radius: 8px !important;
+    padding: 14px 16px !important;
+    cursor: pointer !important;
+    transition: all 0.15s !important;
+    position: relative !important;
+}
+.scenario-radio .wrap label:hover {
+    border-color: rgba(248,81,73,0.4) !important;
+    background: #1c2128 !important;
+}
+.scenario-radio .wrap label:has(input:checked) {
+    border: 2px solid #f85149 !important;
+    background: #1c2128 !important;
+    box-shadow: 0 0 12px rgba(248,81,73,0.2) !important;
+}
+/* Hide the actual radio dot */
+.scenario-radio .wrap input[type="radio"] {
+    position: absolute !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    height: 0 !important;
+}
+/* The text shown inside each radio label */
+.scenario-radio .wrap .wrap { display: block !important; }
+
+/* Buttons */
+.primary-btn button {
+    background: #f85149 !important; color: #fff !important;
+    border: none !important; border-radius: 6px !important;
+    font-weight: 700 !important; font-size: 14px !important;
+    text-transform: uppercase !important;
+}
+.primary-btn button:hover { background: #da3633 !important; }
+
+.agent-btn button {
+    background: linear-gradient(135deg, #f85149, #ff9a00) !important;
+    color: #fff !important; border: none !important; border-radius: 6px !important;
+    font-weight: 900 !important; font-size: 15px !important;
+    text-transform: uppercase !important; letter-spacing: 0.08em !important;
+    height: 52px !important; box-shadow: 0 4px 15px rgba(248,81,73,0.3) !important;
+}
+.agent-btn button:hover { transform: translateY(-1px) !important; }
+
+.secondary-btn button {
+    background: transparent !important; color: #8b949e !important;
+    border: 1px solid #30363d !important; border-radius: 6px !important;
+    font-weight: 600 !important; font-size: 13px !important;
+}
+.secondary-btn button:hover { border-color: #f85149 !important; color: #f85149 !important; }
+
+/* Panels */
+.panel-md {
+    background: #161b22 !important; border: 1px solid #21262d !important;
+    border-radius: 8px !important; padding: 12px 16px !important; min-height: 80px;
+}
+.panel-md p, .panel-md li { color: #c9d1d9 !important; font-size: 13px !important; }
+.panel-md code {
+    background: #0d1117 !important; color: #79c0ff !important;
+    padding: 2px 6px !important; border-radius: 4px !important; font-size: 12px !important;
+}
+.panel-md strong { color: #e6edf3 !important; }
+
+/* Agent log */
+.agent-log {
+    background: #0d1117 !important; border: 1px solid #21262d !important;
+    border-radius: 8px !important; padding: 20px 24px !important;
+    min-height: 500px !important; font-size: 13px !important; line-height: 1.8 !important;
+}
+.agent-log h2 { color: #f85149 !important; font-size: 18px !important; }
+.agent-log h3 {
+    color: #79c0ff !important; font-size: 14px !important;
+    border-left: 3px solid #79c0ff; padding-left: 10px; margin: 20px 0 8px !important;
+}
+.agent-log blockquote {
+    border-left: 3px solid #f85149 !important; padding-left: 12px !important;
+    color: #8b949e !important; margin: 8px 0 !important;
+}
+.agent-log table { width: 100% !important; border-collapse: collapse !important; margin: 12px 0 !important; }
+.agent-log th {
+    background: #161b22 !important; color: #8b949e !important;
+    font-size: 11px !important; text-transform: uppercase !important;
+    letter-spacing: 0.08em !important; padding: 8px 12px !important;
+}
+.agent-log td { padding: 8px 12px !important; border-bottom: 1px solid #21262d !important; color: #c9d1d9 !important; }
+
+/* Score */
+.score-panel {
+    background: #161b22 !important; border: 1px solid #21262d !important;
+    border-radius: 8px !important; padding: 12px 16px !important;
+}
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #0d1117; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
+"""
+
+EXPLAINER = """
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+<div style="background:linear-gradient(135deg,#161b22,#0d1117);border:1px solid #30363d;
+            border-radius:12px;padding:24px 28px;margin-bottom:8px;font-family:'Space Grotesk',sans-serif">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">
+        <span style="font-size:36px">🚨</span>
+        <div>
+            <div style="font-size:22px;font-weight:700;color:#e6edf3">PagerSim-OpenEnv</div>
+            <div style="font-size:11px;color:#8b949e;margin-top:3px;text-transform:uppercase;letter-spacing:0.12em">
+                SRE Incident Response · AI Agent Training Environment · Meta PyTorch Hackathon
+            </div>
+        </div>
+        <div style="margin-left:auto;background:rgba(196,136,1,0.15);border:1px solid rgba(255,186,64,0.3);
+                    padding:6px 14px;border-radius:20px;font-size:11px;font-weight:700;
+                    color:#ffba40;text-transform:uppercase">Meta PyTorch Hackathon</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
+        <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px">
+            <div style="color:#f85149;font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:8px">🎯 What Is This?</div>
+            <div style="color:#8b949e;font-size:12px;line-height:1.6">A simulation where AI agents learn to handle production outages — like a real PagerDuty on-call incident.</div>
+        </div>
+        <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px">
+            <div style="color:#f85149;font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:8px">🤖 Agent Run Tab</div>
+            <div style="color:#8b949e;font-size:12px;line-height:1.6">Watch an AI agent work live — every step, its exact reasoning, and how the environment rewards each action.</div>
+        </div>
+        <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px">
+            <div style="color:#f85149;font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:8px">🧑‍💻 Human Play Tab</div>
+            <div style="color:#8b949e;font-size:12px;line-height:1.6">Play it yourself. Investigate services, find the root cause, fix it, write a postmortem. Compare your score to the AI.</div>
+        </div>
+        <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px">
+            <div style="color:#f85149;font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:8px">📊 Scoring</div>
+            <div style="color:#8b949e;font-size:12px;line-height:1.6">Correct investigation +0.15 · Right fix +0.20 · Good postmortem +0.35 · Perfect = 1.0. Dense partial rewards.</div>
+        </div>
+    </div>
+</div>
+"""
+
+# ── Scenario labels for Radio (shown as cards via CSS) ─────────────────────────
+# Each string is multi-line — Gradio renders it inside the label element
+# CSS above hides the radio dot and styles the label as a card
+
+SCENARIO_CHOICES = [
+    "easy",
+    "medium",
+    "hard",
+]
 
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 
-with gr.Blocks(
-    title="PagerSim-OpenEnv",
-    theme=gr.themes.Soft(primary_hue="red", secondary_hue="orange"),
-) as demo:
+with gr.Blocks(title="PagerSim-OpenEnv", css=CSS, theme=gr.themes.Base()) as demo:
 
     obs_state = gr.State("{}")
+    gr.HTML(EXPLAINER)
 
-    gr.Markdown("""
-# 🚨 PagerSim-OpenEnv
-**SRE Incident Response Simulation · OpenEnv Environment · Meta PyTorch Hackathon**
+    with gr.Tabs():
 
-An AI agent training environment where agents act as on-call SRE engineers —
-reading alerts, investigating services, finding root causes, and resolving incidents.
+        # ══════════════════════════════════════════════════════════════════════
+        # TAB 1 — AGENT RUN
+        # ══════════════════════════════════════════════════════════════════════
+        with gr.Tab("🤖 Agent Run — Watch AI Solve Incidents Live"):
+
+            gr.Markdown("""
+### How it works
+**Click a scenario** below to select it, then click **Deploy Agent**.
+The AI reads alerts, investigates services, reasons through the problem,
+applies the fix, and writes a postmortem — completely autonomously.
+Every step of its thinking is shown in real time.
 """)
 
-    with gr.Row():
-        with gr.Column(scale=3):
+            # Scenario info cards (visual only — for context)
+            gr.HTML("""
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:4px;font-family:'Space Grotesk',sans-serif">
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px">
+        <div style="color:#3fb950;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px">● EASY · 5 min · 2 services</div>
+        <div style="color:#e6edf3;font-weight:700;font-size:14px;margin-bottom:5px">Database Overload</div>
+        <div style="color:#8b949e;font-size:12px;line-height:1.5">Postgres connection pool exhausted. payment-service down. Clear log trail.</div>
+    </div>
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px">
+        <div style="color:#f0883e;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px">● MEDIUM · 10 min · 3 services</div>
+        <div style="color:#e6edf3;font-weight:700;font-size:14px;margin-bottom:5px">Cascading Auth Failure</div>
+        <div style="color:#8b949e;font-size:12px;line-height:1.5">Auth service memory leak causes cascade. api-gateway is a victim, not the cause.</div>
+    </div>
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px">
+        <div style="color:#f85149;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px">● HARD · 15 min · 5 services</div>
+        <div style="color:#e6edf3;font-weight:700;font-size:14px;margin-bottom:5px">Rate Limiter Poisoning</div>
+        <div style="color:#8b949e;font-size:12px;line-height:1.5">Bad config throttles all traffic. payment-service deploy is a red herring trap.</div>
+    </div>
+</div>
+""")
+
+            # Actual functional selector
+            agent_task = gr.Radio(
+                choices=["easy", "medium", "hard"],
+                value="easy",
+                label="Select Scenario",
+                elem_classes=["scenario-radio"],
+            )
+
+            with gr.Row(elem_classes=["agent-btn"]):
+                agent_run_btn = gr.Button(
+                    "🚀  Deploy Agent — Start Autonomous Incident Response",
+                    size="lg",
+                )
+
+            agent_status = gr.Markdown(
+                "_Select a scenario above and click Deploy Agent._"
+            )
+
+            with gr.Row():
+                with gr.Column(scale=3):
+                    gr.Markdown("### 🧠 Agent Activity Log — Live")
+                    gr.Markdown(
+                        "_Every action appears here in real time: "
+                        "what the agent observed, what it decided, "
+                        "its exact reasoning, and what reward it received._"
+                    )
+                    agent_log = gr.Markdown(
+                        "**Waiting for agent...**\n\nClick **Deploy Agent** above.",
+                        elem_classes=["agent-log"],
+                    )
+                with gr.Column(scale=1):
+                    gr.Markdown("### 📊 Live Score")
+                    agent_score = gr.Markdown(score_bar(0.0), elem_classes=["score-panel"])
+                    gr.Markdown("### 🖥️ Service Status")
+                    agent_svc   = gr.Markdown("_Not started_", elem_classes=["panel-md"])
+                    gr.Markdown("### 📋 Revealed Logs")
+                    agent_logs  = gr.Markdown("_No logs yet_", elem_classes=["panel-md"])
+
+            with gr.Accordion("📖 Reward Reference", open=False):
+                gr.Markdown("""
+| Action | Condition | Score |
+|---|---|---|
+| `investigate_service` | Correct service | **+0.15** |
+| `check_dependencies` | Correct service | **+0.10** |
+| `restart_service` / `rollback_deployment` | Correct service | **+0.20** |
+| `write_postmortem` | Correct root cause + quality | **+0.35** |
+| `declare_resolved` | After fix + postmortem | **+0.25** |
+| Wrong restart/rollback | — | **-0.10** |
+| Redundant investigation | — | **-0.05** |
+| Timeout / premature resolve | — | **-0.10 to -0.15** |
+""")
+
+        # ══════════════════════════════════════════════════════════════════════
+        # TAB 2 — HUMAN PLAY
+        # ══════════════════════════════════════════════════════════════════════
+        with gr.Tab("🧑‍💻 Human Play — Try It Yourself"):
+
+            gr.Markdown("""
+### You are the on-call SRE
+Production is broken. Read the alerts, investigate services, find the root cause, apply the fix.
+Compare your score against the AI agent.
+""")
+
+            # Info cards (visual)
+            gr.HTML("""
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:4px;font-family:'Space Grotesk',sans-serif">
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px">
+        <div style="color:#3fb950;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px">● EASY · 5 min</div>
+        <div style="color:#e6edf3;font-weight:700;font-size:14px;margin-bottom:5px">Database Overload</div>
+        <div style="color:#8b949e;font-size:12px">Root cause: <code style="background:#0d1117;color:#79c0ff;padding:2px 5px;border-radius:3px">database_connection_pool_exhausted</code></div>
+    </div>
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px">
+        <div style="color:#f0883e;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px">● MEDIUM · 10 min</div>
+        <div style="color:#e6edf3;font-weight:700;font-size:14px;margin-bottom:5px">Cascading Auth Failure</div>
+        <div style="color:#8b949e;font-size:12px">Root cause: <code style="background:#0d1117;color:#79c0ff;padding:2px 5px;border-radius:3px">auth_service_memory_leak_bad_deployment</code></div>
+    </div>
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px">
+        <div style="color:#f85149;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px">● HARD · 15 min</div>
+        <div style="color:#e6edf3;font-weight:700;font-size:14px;margin-bottom:5px">Rate Limiter Poisoning</div>
+        <div style="color:#8b949e;font-size:12px">Root cause: <code style="background:#0d1117;color:#79c0ff;padding:2px 5px;border-radius:3px">api_gateway_rate_limiter_config_poisoning</code></div>
+    </div>
+</div>
+""")
+
+            # Functional selector
             task_picker = gr.Radio(
                 choices=["easy", "medium", "hard"],
                 value="easy",
-                label="📋 Select Task Difficulty",
-                info=(
-                    "Easy: DB overload (2 services) | "
-                    "Medium: Auth cascade (3 services) | "
-                    "Hard: Config poisoning + red herring (5 services)"
-                ),
-            )
-            reset_btn = gr.Button("🚀 Start Episode", variant="primary", size="lg")
-
-        with gr.Column(scale=2):
-            gr.Markdown("### 🤖 Baseline Agent")
-            baseline_btn = gr.Button("Run Baseline on All 3 Tasks", variant="secondary")
-            baseline_out = gr.Markdown("_Runs a rule-based agent against all tasks._")
-
-    incident_info = gr.Markdown("_Select a task and click Start Episode to begin._")
-
-    gr.Markdown("---")
-
-    with gr.Row():
-        with gr.Column(scale=1):
-            gr.Markdown("### 🔔 Active Alerts")
-            alerts_box = gr.Markdown("_No alerts._")
-            gr.Markdown("### 🖥️ Service Status")
-            status_box = gr.Markdown("_No services._")
-
-        with gr.Column(scale=2):
-            gr.Markdown("### 📋 Service Logs")
-            logs_box = gr.Markdown("_No logs yet._")
-
-    gr.Markdown("### 📊 Episode Score")
-    score_display = gr.Markdown(format_score_bar(0.0))
-
-    gr.Markdown("---")
-    gr.Markdown("### ⚡ Take Action")
-
-    with gr.Row():
-        with gr.Column(scale=2):
-            action_type = gr.Dropdown(
-                choices=[
-                    "investigate_service",
-                    "check_dependencies",
-                    "restart_service",
-                    "rollback_deployment",
-                    "escalate",
-                    "silence_alert",
-                    "write_postmortem",
-                    "declare_resolved",
-                ],
-                value="investigate_service",
-                label="Action Type",
-            )
-        with gr.Column(scale=2):
-            target_service = gr.Textbox(
-                label="Target Service",
-                placeholder="e.g. payment-service, postgres-db",
-                info="Required for: investigate, check_dependencies, restart, rollback",
+                label="Select Task",
+                elem_classes=["scenario-radio"],
             )
 
-    reasoning = gr.Textbox(
-        label="Reasoning (required — min 10 characters)",
-        placeholder="Explain why you are taking this action...",
-        lines=2,
+            with gr.Row():
+                with gr.Column(scale=3, elem_classes=["primary-btn"]):
+                    reset_btn = gr.Button("🚀 Start Episode", size="lg")
+                with gr.Column(scale=2, elem_classes=["secondary-btn"]):
+                    baseline_btn = gr.Button("🤖 Run Rule-Based Baseline Agent")
+                    baseline_out = gr.Markdown("_Click to run the deterministic baseline._")
+
+            incident_info = gr.Markdown("_Select a task above and click Start Episode._")
+            gr.Markdown("---")
+
+            with gr.Row():
+                with gr.Column(scale=1):
+                    gr.Markdown("### 🔔 Active Alerts")
+                    alerts_box = gr.Markdown("_No alerts._", elem_classes=["panel-md"])
+                    gr.Markdown("### 🖥️ Service Status")
+                    status_box = gr.Markdown("_No services._", elem_classes=["panel-md"])
+                with gr.Column(scale=2):
+                    gr.Markdown("### 📋 Service Logs")
+                    logs_box = gr.Markdown("_No logs yet._", elem_classes=["panel-md"])
+
+            gr.Markdown("### 📊 Episode Score")
+            score_display = gr.Markdown(score_bar(0.0), elem_classes=["score-panel"])
+            gr.Markdown("---")
+            gr.Markdown("### ⚡ Take Action")
+
+            with gr.Row():
+                with gr.Column(scale=2):
+                    action_type = gr.Dropdown(
+                        choices=["investigate_service", "check_dependencies",
+                                 "restart_service", "rollback_deployment",
+                                 "escalate", "silence_alert",
+                                 "write_postmortem", "declare_resolved"],
+                        value="investigate_service",
+                        label="Action Type",
+                        interactive=True,
+                    )
+                with gr.Column(scale=2):
+                    target_service = gr.Textbox(
+                        label="Target Service",
+                        placeholder="e.g. payment-service, postgres-db, auth-service",
+                    )
+
+            reasoning = gr.Textbox(
+                label="Reasoning (required — min 10 characters)",
+                placeholder="Explain why you are taking this action...",
+                lines=2,
+            )
+
+            with gr.Accordion("📝 Postmortem Fields (expand for write_postmortem)", open=False):
+                root_cause = gr.Textbox(label="Root Cause", placeholder="e.g. database_connection_pool_exhausted")
+                timeline   = gr.Textbox(label="Timeline (one per line, min 2)", lines=3,
+                                         placeholder="T+0s: Alerts fired\nT+60s: Root cause found\nT+120s: Fix applied")
+                with gr.Row():
+                    impact     = gr.Textbox(label="Impact",     placeholder="What was affected?")
+                    resolution = gr.Textbox(label="Resolution", placeholder="How was it fixed?")
+                    prevention = gr.Textbox(label="Prevention", placeholder="How to prevent?")
+
+            with gr.Row(elem_classes=["primary-btn"]):
+                step_btn = gr.Button("▶️ Submit Action", size="lg")
+
+            gr.Markdown("### 📜 Last Action Result")
+            history_box = gr.Markdown("_No actions taken yet._", elem_classes=["panel-md"])
+
+    # ── Wire events ───────────────────────────────────────────────────────────
+
+    agent_run_btn.click(
+        fn=run_agent_episode,
+        inputs=[agent_task],
+        outputs=[agent_log, agent_svc, agent_logs, agent_score, agent_status],
     )
 
-    with gr.Accordion("📝 Postmortem Fields (expand for write_postmortem action)", open=False):
-        root_cause = gr.Textbox(
-            label="Root Cause",
-            placeholder="e.g. database_connection_pool_exhausted",
-        )
-        timeline = gr.Textbox(
-            label="Timeline (one entry per line, min 2)",
-            lines=3,
-            placeholder="T+0s: Alerts fired\nT+60s: Root cause found\nT+120s: Fix applied",
-        )
-        with gr.Row():
-            impact     = gr.Textbox(label="Impact",     placeholder="What was affected?")
-            resolution = gr.Textbox(label="Resolution", placeholder="How was it fixed?")
-            prevention = gr.Textbox(label="Prevention", placeholder="How to prevent recurrence?")
-
-    step_btn = gr.Button("▶️ Submit Action", variant="primary", size="lg")
-
-    gr.Markdown("### 📜 Last Action Result")
-    history_box = gr.Markdown("_No actions taken yet._")
-
-    gr.Markdown("---")
-
-    with gr.Accordion("📖 Scoring Guide & Task Reference", open=False):
-        gr.Markdown("""
-## Reward Breakdown
-
-| Action | Score |
-|---|---|
-| Investigate correct service | **+0.15** |
-| Check dependencies correctly | **+0.10** |
-| Apply correct fix | **+0.20** |
-| Correct root cause in postmortem | **+0.20** |
-| High quality postmortem | **+0.15** |
-| Declare resolved (fix + postmortem) | **+0.25** |
-| Wrong restart or rollback | **-0.10** |
-| Redundant investigation | **-0.05** |
-| Premature resolution / timeout | **-0.10 to -0.15** |
-
-## Task Root Causes (use these exact strings)
-
-| Task | Root Cause String |
-|---|---|
-| Easy | `database_connection_pool_exhausted` |
-| Medium | `auth_service_memory_leak_bad_deployment` |
-| Hard | `api_gateway_rate_limiter_config_poisoning` |
-
-## Optimal Strategy
-1. `investigate_service` on the most critical service
-2. `check_dependencies` to map relationships
-3. `investigate_service` on root cause service
-4. `restart_service` or `rollback_deployment` on correct service
-5. `write_postmortem` with exact root cause string
-6. `declare_resolved`
-""")
-
-    # Wire up
     reset_btn.click(
-        fn=do_reset,
+        fn=human_reset,
         inputs=[task_picker],
-        outputs=[incident_info, alerts_box, status_box,
-                 logs_box, score_display, history_box, obs_state],
+        outputs=[incident_info, alerts_box, status_box, logs_box,
+                 score_display, history_box, obs_state],
     )
 
     step_btn.click(
-        fn=do_step,
+        fn=human_step,
         inputs=[obs_state, action_type, target_service, reasoning,
                 root_cause, timeline, impact, resolution, prevention],
-        outputs=[incident_info, alerts_box, status_box,
-                 logs_box, score_display, history_box, obs_state],
+        outputs=[incident_info, alerts_box, status_box, logs_box,
+                 score_display, history_box, obs_state],
     )
 
-    baseline_btn.click(
-        fn=do_baseline,
-        inputs=[],
-        outputs=[baseline_out],
-    )
+    baseline_btn.click(fn=run_baseline_quick, inputs=[], outputs=[baseline_out])
 
 
 if __name__ == "__main__":
-    demo.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
-        show_error=True,
-    )
+    demo.launch(server_name="0.0.0.0", server_port=7860, show_error=True)
