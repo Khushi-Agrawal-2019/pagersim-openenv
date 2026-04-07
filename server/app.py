@@ -853,7 +853,11 @@ from api.server import app as fastapi_app
 # FastAPI routes in fastapi_app (like /reset) will take precedence.
 app = gr.mount_gradio_app(fastapi_app, demo, path="/")
 
-if __name__ == "__main__":
+def main():
     import uvicorn
     # Use 7860 as the main port for everything
     uvicorn.run(app, host="0.0.0.0", port=7860)
+
+
+if __name__ == "__main__":
+    main()
