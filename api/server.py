@@ -50,7 +50,7 @@ server_start_time: float = 0.0
 
 
 class ResetRequest(BaseModel):
-    task_id: str
+    task_id: str = "easy"
 
 
 class GraderRequest(BaseModel):
@@ -98,11 +98,13 @@ async def tasks():
 
 
 @app.post("/reset")
-async def reset(request: ResetRequest):
+async def reset(request: ResetRequest | None = None):
+    # Default to "easy" if body is missing or task_id not provided
+    req = request or ResetRequest(task_id="easy")
     if env is None:
         raise HTTPException(500, detail="Environment not initialized. Server still starting up.")
     try:
-        obs = env.reset(request.task_id)
+        obs = env.reset(req.task_id)
         return obs.model_dump()
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
