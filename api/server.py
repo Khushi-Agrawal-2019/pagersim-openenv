@@ -9,7 +9,7 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -50,7 +50,7 @@ server_start_time: float = 0.0
 
 
 class ResetRequest(BaseModel):
-    task_id: str = "easy"
+    task_id: str | None = "easy"
 
 
 class GraderRequest(BaseModel):
@@ -98,13 +98,17 @@ async def tasks():
 
 
 @app.post("/reset")
-async def reset(request: ResetRequest | None = None):
-    # Default to "easy" if body is missing or task_id not provided
-    req = request or ResetRequest(task_id="easy")
+async def reset(
+    request: ResetRequest | None = Body(None),
+    task_id: str | None = None
+):
+    # 1. Check query param first, then body, then default
+    t_id = task_id or (request.task_id if request else "easy")
+    
     if env is None:
         raise HTTPException(500, detail="Environment not initialized. Server still starting up.")
     try:
-        obs = env.reset(req.task_id)
+        obs = env.reset(t_id)
         return obs.model_dump()
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
