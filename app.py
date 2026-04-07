@@ -561,11 +561,11 @@ EXPLAINER = """
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
         <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px">
             <div style="color:#f85149;font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:8px">🎯 What Is This?</div>
-            <div style="color:#8b949e;font-size:12px;line-height:1.6">A simulation where AI agents learn to handle production outages — like a real PagerDuty on-call incident.</div>
+            <div style="color:#8b949e;font-size:12px;line-height:1.6">A simulation where AI agents learn to handle production outages like a real PagerDuty on-call incident.</div>
         </div>
         <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px">
             <div style="color:#f85149;font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:8px">🤖 Agent Run Tab</div>
-            <div style="color:#8b949e;font-size:12px;line-height:1.6">Watch an AI agent work live — every step, its exact reasoning, and how the environment rewards each action.</div>
+            <div style="color:#8b949e;font-size:12px;line-height:1.6">Watch an AI agent work live every step, its exact reasoning, and how the environment rewards each action.</div>
         </div>
         <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px">
             <div style="color:#f85149;font-weight:700;font-size:11px;text-transform:uppercase;margin-bottom:8px">🧑‍💻 Human Play Tab</div>
