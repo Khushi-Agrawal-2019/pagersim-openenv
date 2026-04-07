@@ -1,10 +1,10 @@
 ---
-- title: PagerSim-OpenEnv
-- emoji: 🚨
-- colorFrom: red
-- colorTo: blue
-- sdk: docker
-- pinned: true
+title: PagerSim-OpenEnv
+emoji: 🚨
+colorFrom: red
+colorTo: blue
+sdk: docker
+pinned: true
 ---
 
 # 🚨 PagerSim-OpenEnv
@@ -127,3 +127,4 @@ python3 inference.py
 2.  **Medium: Cascading Auth Failure**: A memory leak in a core service causes upstream timeouts.
 3.  **Hard: Rate Limiter Poisoning**: A configuration error throttles production traffic; a recent deployment is a red herring.
 
+---
