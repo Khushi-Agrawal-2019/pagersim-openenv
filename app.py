@@ -848,14 +848,10 @@ Most OpenEnv environments focus on web navigation or code editing. PagerSim-Open
 
 # ── Unified App for HF Spaces ───────────────────────────────────────────────
 from api.server import app as fastapi_app
-from fastapi.responses import RedirectResponse
 
-@fastapi_app.get("/", include_in_schema=False)
-async def home_redirect():
-    # Redirect human users from / to /ui 
-    return RedirectResponse(url="/ui")
-
-app = gr.mount_gradio_app(fastapi_app, demo, path="/ui")
+# Mount Gradio at / directly. 
+# FastAPI routes in fastapi_app (like /reset) will take precedence.
+app = gr.mount_gradio_app(fastapi_app, demo, path="/")
 
 if __name__ == "__main__":
     import uvicorn
