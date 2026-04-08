@@ -14,6 +14,7 @@ import os
 import json
 import time
 import sys
+import math
 import requests
 from openai import OpenAI
 from dotenv import load_dotenv
