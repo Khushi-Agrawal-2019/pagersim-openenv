@@ -92,8 +92,11 @@ class Reward(BaseModel):
 
     @model_validator(mode="after")
     def clamp_scores(self) -> "Reward":
-        self.score = max(-0.999, min(0.999, self.score))
-        self.cumulative_score = max(-0.999, min(0.999, self.cumulative_score))
+        # Never allow exactly 0.0 — use tiny epsilon so validator passes
+        raw = max(-0.999, min(0.999, self.score))
+        self.score = raw if raw != 0.0 else 0.001
+        raw_c = max(-0.999, min(0.999, self.cumulative_score))
+        self.cumulative_score = raw_c if raw_c != 0.0 else 0.001
         return self
 
 

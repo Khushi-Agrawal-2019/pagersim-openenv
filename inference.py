@@ -201,7 +201,7 @@ def run_task(client: OpenAI, task_id: str) -> dict:
 
     return {
         "task_id":      task_id,
-        "final_score":  round(max(0.001, min(0.999, final_score)), 3),
+        "final_score": round(max(0.001, min(0.999, final_score)), 3),
         "steps":        steps,
         "time_seconds": round(elapsed, 1),
         "success":      final_score >= 0.5,

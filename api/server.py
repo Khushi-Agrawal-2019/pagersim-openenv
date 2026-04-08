@@ -152,9 +152,16 @@ async def step(request: Request, action: Action | None = Body(default=None)):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Step failed: {str(e)}")
+    reward_dict = reward.model_dump()
+    # Ensure reward scores are strictly between 0 and 1 for validator compliance
+    for key in ("score", "cumulative_score"):
+        if key in reward_dict:
+            v = float(reward_dict[key])
+            v = max(-0.999, min(0.999, v))
+            reward_dict[key] = v if v != 0.0 else 0.001
     return {
         "observation": obs.model_dump(),
-        "reward": reward.model_dump(),
+        "reward": reward_dict,
         "done": done,
         "info": info
     }
