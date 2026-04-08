@@ -85,7 +85,7 @@ class IncidentResponseEnv:
 
         action_reward_score, reward_breakdown, reward_feedback = self._apply_action(action)
 
-        self.cumulative_score = max(-1.0, min(1.0, self.cumulative_score + action_reward_score))
+        self.cumulative_score = max(-0.999, min(0.999, self.cumulative_score + action_reward_score))
 
         done = False
         reason = "continue"
@@ -262,7 +262,7 @@ class IncidentResponseEnv:
 
     def _make_reward(self, score, feedback, breakdown) -> Reward:
         """Build a Reward object with clamped scores."""
-        score = max(-1.0, min(1.0, score))
+        score = max(-0.999, min(0.999, score))
         return Reward(
             score=score,
             cumulative_score=self.cumulative_score,
