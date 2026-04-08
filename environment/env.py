@@ -30,7 +30,7 @@ class IncidentResponseEnv:
         self.investigation_counts: dict[str, int] = {}
         self.episode_start_time: float = 0.0
         self.time_elapsed: int = 0
-        self.cumulative_score: float = 0.0
+        self.cumulative_score: float = 0.001
         self.episode_active: bool = False
         self.correct_fix_applied: bool = False
         self.postmortem_submitted: bool = False
@@ -46,7 +46,7 @@ class IncidentResponseEnv:
         self.investigation_counts = {}
         self.episode_start_time = time.monotonic()
         self.time_elapsed = 0
-        self.cumulative_score = 0.0
+        self.cumulative_score = 0.001
         self.episode_active = True
         self.correct_fix_applied = False
         self.postmortem_submitted = False
