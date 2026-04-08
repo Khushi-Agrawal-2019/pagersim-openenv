@@ -66,10 +66,15 @@ def strict_score(v: float) -> float:
 
 
 def sanitize_reward_dict(reward_dict: dict) -> dict:
-    """Sanitizes score and cumulative_score in a reward dictionary."""
+    """Sanitizes score, cumulative_score, and breakdown in a reward dictionary."""
     for key in ("score", "cumulative_score"):
         if key in reward_dict:
             reward_dict[key] = strict_score(reward_dict[key])
+    
+    if "breakdown" in reward_dict and isinstance(reward_dict["breakdown"], dict):
+        for k in reward_dict["breakdown"]:
+            reward_dict["breakdown"][k] = strict_score(reward_dict["breakdown"][k])
+            
     return reward_dict
 
 

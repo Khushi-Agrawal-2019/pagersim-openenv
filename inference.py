@@ -180,8 +180,10 @@ def run_task(client: OpenAI, task_id: str) -> dict:
             if action_dict.get("target_service"):
                 action_str += f":{action_dict['target_service']}"
             
+            # Ensure log outputs are also compliant with (0, 1) range
+            safe_reward = max(0.001, min(0.999, float(step_reward)))
             done_str = "true" if done else "false"
-            print(f"[STEP] step={steps} action={action_str} reward={step_reward:.2f} done={done_str} error={last_error}")
+            print(f"[STEP] step={steps} action={action_str} reward={safe_reward:.3f} done={done_str} error={last_error}")
 
             if done:
                 break
@@ -194,11 +196,12 @@ def run_task(client: OpenAI, task_id: str) -> dict:
     success = "true" if final_score >= 0.5 else "false"
     
     # [END] success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
-    rewards_str = ",".join([f"{r:.2f}" for r in rewards_list])
+    rewards_str = ",".join([f"{max(0.001, min(0.999, r)):.3f}" for r in rewards_list])
     # Ensure rewards_str is not empty for formatting
-    if not rewards_str: rewards_str = "0.00"
+    if not rewards_str: rewards_str = "0.001"
     
-    print(f"[END] success={success} steps={steps} score={final_score:.2f} rewards={rewards_str}")
+    safe_final = max(0.001, min(0.999, float(final_score)))
+    print(f"[END] success={success} steps={steps} score={safe_final:.3f} rewards={rewards_str}")
 
     return {
         "task_id":      task_id,
