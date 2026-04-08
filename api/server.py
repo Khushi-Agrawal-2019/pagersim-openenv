@@ -55,8 +55,9 @@ class ResetRequest(BaseModel):
 
 def clamp_score(raw_score: float) -> float:
     """Clamps score strictly between 0 and 1 (0.01 to 0.99) for validator compliance."""
-    # Ensure it's within [0.01, 0.99]
-    return max(0.01, min(0.99, raw_score))
+    # Ensure it's strictly in (0, 1) by mapping [-1, 1] -> [0.01, 0.99]
+    normalized = (max(-1.0, min(1.0, raw_score)) + 1) / 2
+    return 0.01 + 0.98 * normalized
 
 
 class GraderRequest(BaseModel):

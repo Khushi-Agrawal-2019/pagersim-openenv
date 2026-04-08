@@ -92,8 +92,11 @@ class Reward(BaseModel):
 
     @model_validator(mode="after")
     def clamp_scores(self) -> "Reward":
-        self.score = max(-1.0, min(1.0, self.score))
-        self.cumulative_score = max(-1.0, min(1.0, self.cumulative_score))
+        # Hackathon Requirement: Strictly between 0 and 1 for task scores.
+        # We also clamp per-step rewards to (-0.99, 0.99) just in case.
+        self.score = max(-0.99, min(0.99, self.score))
+        # Ensure cumulative_score is strictly in (0, 1)
+        self.cumulative_score = max(0.01, min(0.99, self.cumulative_score))
         return self
 
 
@@ -113,7 +116,7 @@ class EpisodeResult(BaseModel):
     """Returned by /grader endpoint after a full episode."""
 
     task_id: str = Field(...)
-    final_score: float = Field(..., ge=0.0, le=1.0)
+    final_score: float = Field(..., gt=0.0, lt=1.0)
     steps_taken: int = Field(...)
     time_seconds: float = Field(...)
     actions_summary: list[str] = Field(...)
