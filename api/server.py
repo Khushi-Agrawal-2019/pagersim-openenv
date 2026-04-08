@@ -153,12 +153,13 @@ async def step(request: Request, action: Action | None = Body(default=None)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Step failed: {str(e)}")
     reward_dict = reward.model_dump()
-    # Ensure reward scores are strictly between 0 and 1 for validator compliance
+    # Bulletproof Clamping: Ensure all scores are strictly between 0.001 and 0.999
+    # This addresses the (0, 1) requirement and prevents negative scores.
     for key in ("score", "cumulative_score"):
         if key in reward_dict:
             v = float(reward_dict[key])
-            v = max(-0.999, min(0.999, v))
-            reward_dict[key] = v if v != 0.0 else 0.001
+            reward_dict[key] = max(0.001, min(0.999, v))
+            
     return {
         "observation": obs.model_dump(),
         "reward": reward_dict,
@@ -172,7 +173,10 @@ async def state():
     if env is None:
         raise HTTPException(400, detail="Environment not initialized.")
     try:
-        return env.state()
+        s = env.state()
+        if "cumulative_score" in s:
+            s["cumulative_score"] = max(0.001, min(0.999, s["cumulative_score"]))
+        return s
     except Exception as e:
         raise HTTPException(400, detail=f"State failed: {str(e)}")
 

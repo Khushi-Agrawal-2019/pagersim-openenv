@@ -85,8 +85,8 @@ class IncidentResponseEnv:
 
         action_reward_score, reward_breakdown, reward_feedback = self._apply_action(action)
 
-        new_cum = max(-0.999, min(0.999, self.cumulative_score + action_reward_score))
-        self.cumulative_score = new_cum if new_cum != 0.0 else 0.001
+        # Bulletproof cumulative score: strictly in (0.001, 0.999)
+        self.cumulative_score = max(0.001, min(0.999, self.cumulative_score + action_reward_score))
 
         done = False
         reason = "continue"
@@ -119,7 +119,7 @@ class IncidentResponseEnv:
             "task_id": self.current_scenario.id if self.current_scenario else None,
             "time_elapsed": self.time_elapsed,
             "time_limit": self.current_scenario.time_limit_seconds if self.current_scenario else None,
-            "cumulative_score": self.cumulative_score,
+            "cumulative_score": max(0.001, min(0.999, self.cumulative_score)),
             "actions_taken": self.actions_taken,
             "current_service_status": self.current_service_status,
             "correct_fix_applied": self.correct_fix_applied,
