@@ -53,6 +53,20 @@ class ResetRequest(BaseModel):
     task_id: str = Field("easy", description="ID of the task to reset to")
 
 
+def strict_score(v: float) -> float:
+    """Clamps score strictly within (0.001, 0.999)."""
+    clamped = max(0.001, min(0.999, v))
+    return clamped if clamped != 0.0 else 0.001
+
+
+def sanitize_reward_dict(reward_dict: dict) -> dict:
+    """Sanitizes score and cumulative_score in a reward dictionary."""
+    for key in ("score", "cumulative_score"):
+        if key in reward_dict:
+            reward_dict[key] = strict_score(float(reward_dict[key]))
+    return reward_dict
+
+
 
 
 class GraderRequest(BaseModel):
@@ -152,14 +166,7 @@ async def step(request: Request, action: Action | None = Body(default=None)):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Step failed: {str(e)}")
-    reward_dict = reward.model_dump()
-    # Bulletproof Clamping: Ensure all scores are strictly between 0.001 and 0.999
-    # This addresses the (0, 1) requirement and prevents negative scores.
-    for key in ("score", "cumulative_score"):
-        if key in reward_dict:
-            v = float(reward_dict[key])
-            reward_dict[key] = max(0.001, min(0.999, v))
-            
+    reward_dict = sanitize_reward_dict(reward.model_dump())
     return {
         "observation": obs.model_dump(),
         "reward": reward_dict,
@@ -202,7 +209,7 @@ async def grader(request: GraderRequest):
 
     episode_result = EpisodeResult(
         task_id=request.task_id,
-        final_score=max(0.001, min(0.999, final_state["cumulative_score"])),
+        final_score=strict_score(final_state["cumulative_score"]),
         steps_taken=final_state["steps_taken"],
         time_seconds=float(final_state["time_elapsed"]),
         actions_summary=final_state["actions_taken"],
@@ -257,9 +264,9 @@ async def baseline():
                 break
 
         final_state = temp_env.state()
-        scores[task_id] = max(0.001, min(0.999, final_state["cumulative_score"]))
+        scores[task_id] = strict_score(final_state["cumulative_score"])
 
-    average_score = max(0.001, min(0.999, sum(scores.values()) / len(scores)))
+    average_score = strict_score(sum(scores.values()) / len(scores))
 
     return {
         "scores": scores,

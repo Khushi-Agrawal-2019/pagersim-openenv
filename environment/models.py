@@ -93,8 +93,10 @@ class Reward(BaseModel):
     @model_validator(mode="after")
     def clamp_scores(self) -> "Reward":
         # Hackathon Requirement: Strictly between 0 and 1 for all score fields
-        self.score = max(0.001, min(0.999, self.score))
-        self.cumulative_score = max(0.001, min(0.999, self.cumulative_score))
+        s = max(-0.999, min(0.999, self.score))
+        self.score = s if s != 0.0 else 0.001
+        c = max(-0.999, min(0.999, self.cumulative_score))
+        self.cumulative_score = c if c != 0.0 else 0.001
         return self
 
 
