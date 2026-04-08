@@ -8,6 +8,7 @@ import time
 import os
 from contextlib import asynccontextmanager
 from typing import Any
+import math
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,16 +55,21 @@ class ResetRequest(BaseModel):
 
 
 def strict_score(v: float) -> float:
-    """Clamps score strictly within (0.001, 0.999)."""
-    clamped = max(0.001, min(0.999, v))
-    return clamped if clamped != 0.0 else 0.001
+    """Clamps score strictly within (0.001, 0.999) and handles NaN/Inf."""
+    try:
+        val = float(v)
+        if not math.isfinite(val):
+            return 0.001
+        return max(0.001, min(0.999, val))
+    except (TypeError, ValueError):
+        return 0.001
 
 
 def sanitize_reward_dict(reward_dict: dict) -> dict:
     """Sanitizes score and cumulative_score in a reward dictionary."""
     for key in ("score", "cumulative_score"):
         if key in reward_dict:
-            reward_dict[key] = strict_score(float(reward_dict[key]))
+            reward_dict[key] = strict_score(reward_dict[key])
     return reward_dict
 
 

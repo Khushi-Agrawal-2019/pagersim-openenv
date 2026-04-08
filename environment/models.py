@@ -3,6 +3,7 @@ Defines the typed contracts for Observation, Action, Reward, and supporting
 models used throughout the incident response simulation environment."""
 
 from __future__ import annotations
+import math
 from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -93,10 +94,15 @@ class Reward(BaseModel):
     @model_validator(mode="after")
     def clamp_scores(self) -> "Reward":
         # Hackathon Requirement: Strictly between 0 and 1 for all score fields
-        s = max(-0.999, min(0.999, self.score))
-        self.score = s if s != 0.0 else 0.001
-        c = max(-0.999, min(0.999, self.cumulative_score))
-        self.cumulative_score = c if c != 0.0 else 0.001
+        def safe_clamp(v):
+            try:
+                val = float(v)
+                if not math.isfinite(val): return 0.001
+                return max(0.001, min(0.999, val))
+            except: return 0.001
+            
+        self.score = safe_clamp(self.score)
+        self.cumulative_score = safe_clamp(self.cumulative_score)
         return self
 
 

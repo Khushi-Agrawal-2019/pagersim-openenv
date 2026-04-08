@@ -6,6 +6,7 @@ partial progress signals across 3 difficulty levels."""
 from __future__ import annotations
 import time
 import copy
+import math
 from typing import Any
 from environment.models import (
     Alert, LogEntry, Observation, Action, Reward, PostMortem
@@ -86,7 +87,10 @@ class IncidentResponseEnv:
         action_reward_score, reward_breakdown, reward_feedback = self._apply_action(action)
 
         # Bulletproof cumulative score: strictly in (0.001, 0.999)
-        self.cumulative_score = max(0.001, min(0.999, self.cumulative_score + action_reward_score))
+        new_val = self.cumulative_score + action_reward_score
+        if not math.isfinite(new_val):
+            new_val = 0.001
+        self.cumulative_score = max(0.001, min(0.999, new_val))
 
         done = False
         reason = "continue"
@@ -119,7 +123,7 @@ class IncidentResponseEnv:
             "task_id": self.current_scenario.id if self.current_scenario else None,
             "time_elapsed": self.time_elapsed,
             "time_limit": self.current_scenario.time_limit_seconds if self.current_scenario else None,
-            "cumulative_score": max(0.001, min(0.999, self.cumulative_score)),
+            "cumulative_score": max(0.001, min(0.999, self.cumulative_score)) if math.isfinite(self.cumulative_score) else 0.001,
             "actions_taken": self.actions_taken,
             "current_service_status": self.current_service_status,
             "correct_fix_applied": self.correct_fix_applied,
