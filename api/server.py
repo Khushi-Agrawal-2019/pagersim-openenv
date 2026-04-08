@@ -53,6 +53,12 @@ class ResetRequest(BaseModel):
     task_id: str = Field("easy", description="ID of the task to reset to")
 
 
+def clamp_score(raw_score: float) -> float:
+    """Clamps score strictly between 0 and 1 (0.01 to 0.99) for validator compliance."""
+    # Ensure it's within [0.01, 0.99]
+    return max(0.01, min(0.99, raw_score))
+
+
 class GraderRequest(BaseModel):
     task_id: str
     episode_actions: list[dict[str, Any]]
@@ -189,7 +195,7 @@ async def grader(request: GraderRequest):
 
     episode_result = EpisodeResult(
         task_id=request.task_id,
-        final_score=max(0.0, min(1.0, final_state["cumulative_score"])),
+        final_score=clamp_score(final_state["cumulative_score"]),
         steps_taken=final_state["steps_taken"],
         time_seconds=float(final_state["time_elapsed"]),
         actions_summary=final_state["actions_taken"],
@@ -244,7 +250,7 @@ async def baseline():
                 break
 
         final_state = temp_env.state()
-        scores[task_id] = max(0.0, min(1.0, final_state["cumulative_score"]))
+        scores[task_id] = clamp_score(final_state["cumulative_score"])
 
     average_score = sum(scores.values()) / len(scores)
 
