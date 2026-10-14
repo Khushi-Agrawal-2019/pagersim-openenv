@@ -1,11 +1,4 @@
----
-title: PagerSim-OpenEnv
-emoji: 🚨
-colorFrom: red
-colorTo: blue
-sdk: docker
-pinned: true
----
+
 
 # 🚨 PagerSim-OpenEnv
 
